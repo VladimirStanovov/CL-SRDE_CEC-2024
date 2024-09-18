@@ -1,8 +1,14 @@
+#include <math.h>
 #include <iostream>
 #include <time.h>
 #include <fstream>
 #include <random>
 #include <chrono>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <algorithm>
+#include <unordered_map>
 #include "cec17_test_COP.cpp"
 
 const int ResTsize1 = 28; // number of functions //28 for CEC 2024(2017)
@@ -55,6 +61,7 @@ int stepsFEval[ResTsize2-1];
 double ResultsArray[ResTsize2];
 double ResultsArrayG[ResTsize2][3];
 double ResultsArrayH[ResTsize2][6];
+double ResultsArrayX[ResTsize2][100]; //max D = 100
 int LastFEcount;
 int NFEval = 0;
 int MaxFEval = 0;
@@ -68,13 +75,91 @@ char buffer[500];
 double globalbest;
 double globalbestpenalty;
 bool globalbestinit;
-bool TimeComplexity = true;
+bool TimeComplexity = false;
 double epsilon0001 = 0.0001;
 double PRS_mF[16];
 double PRS_sF[16];
 double PRS_kF[16];
 double Cvalglobal = 4;
 
+struct Params
+{
+    int TaskN;
+    int Type;
+    int PopSizeLoop;
+    int CvalLoop;
+    int LPSR_loop;
+    int Sel1;
+    int Sel2;
+    int Sel3;
+    int Cval1;
+    int Cval2;
+    int Cval3;
+    int GNVars;
+    int MemorySizePar;
+    int initF;
+    int initCr;
+    int pBestStart;
+    int pBestEnd;
+    int MWLp1;
+    int MWLp2;
+    int SortCR;
+    int TopUpdateType;
+    int TopUpdateTypeCR;
+    int TopUpdateTypeP;
+    int SRType;
+    int SRTypeCR;
+    int SRTypeP;
+};
+class Result
+{
+    public:
+    int Node=0;
+    int Task=0;
+    double ResultTable1[ResTsize1][ResTsize2];
+    double ResultTableG1[ResTsize1][ResTsize2][3];
+    double ResultTableH1[ResTsize1][ResTsize2][6];
+    double ResultTableX1[ResTsize1][ResTsize2][100];
+    void Copy(Result &Res2, int ResTsize1, int ResTsize2);
+    Result(){};
+    ~Result(){};
+};
+void Result::Copy(Result &Res2, int _ResTsize1, int _ResTsize2)
+{
+    Node = Res2.Node;
+    Task = Res2.Task;
+    for(int k=0;k!=_ResTsize1;k++)
+        for(int j=0;j!=_ResTsize2;j++)
+        {
+            ResultTable1[k][j] = Res2.ResultTable1[k][j];
+            for(int L=0;L!=3;L++)
+                ResultTableG1[k][j][L] = Res2.ResultTableG1[k][j][L];
+            for(int L=0;L!=6;L++)
+                ResultTableH1[k][j][L] = Res2.ResultTableH1[k][j][L];
+			for(int L=0;L!=100;L++)
+                ResultTableX1[k][j][L] = Res2.ResultTableX1[k][j][L];
+        }
+}
+void qSort1(double* Mass, int low, int high)
+{
+    int i=low;
+    int j=high;
+    double x=Mass[(low+high)>>1];
+    do
+    {
+        while(Mass[i]<x)    ++i;
+        while(Mass[j]>x)    --j;
+        if(i<=j)
+        {
+            double temp=Mass[i];
+            Mass[i]=Mass[j];
+            Mass[j]=temp;
+            i++;    j--;
+        }
+    } while(i<=j);
+    if(low<j)   qSort1(Mass,low,j);
+    if(i<high)  qSort1(Mass,i,high);
+}
 void qSort2int(double* Mass, int* Mass2, int low, int high)
 {
     int i=low;
@@ -97,6 +182,44 @@ void qSort2int(double* Mass, int* Mass2, int low, int high)
     } while(i<=j);
     if(low<j)   qSort2int(Mass,Mass2,low,j);
     if(i<high)  qSort2int(Mass,Mass2,i,high);
+}
+const std::string currentDateTime() {
+    time_t     now = time(NULL);
+    struct tm  tstruct;
+    char       buf[80];
+    tstruct = *localtime(&now);
+    strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+    return buf;
+}
+int getNFreeNodes(int* NodeBusy, int world_size)
+{
+    int counter = 0;
+    for(int i=0;i!=world_size;i++)
+        counter+=NodeBusy[i];
+    return world_size-counter;
+}
+int getNStartedTasks(vector<int> TaskFinished, int NTasks)
+{
+    int counter = 0;
+    for(int i=0;i!=NTasks;i++)
+        if(TaskFinished[i] > 0)
+            counter++;
+    return counter;
+}
+int getNFinishedTasks(vector<int> TaskFinished, int NTasks)
+{
+    int counter = 0;
+    for(int i=0;i!=NTasks;i++)
+        if(TaskFinished[i] == 2)
+            counter++;
+    return counter;
+}
+double getVectorLength(double* Vector, const int Len)
+{
+    double total = 0;
+    for(int i=0;i!=Len;i++)
+        total += Vector[i]*Vector[i];
+    return sqrt(total);
 }
 void getOptimum(const int func_num)
 {
@@ -153,7 +276,7 @@ double cec_24_totalpenalty(const int func_num, double* PopulG, double* PopulH, d
             total += -tempH[i];
     return total/(double(ng_B[func_num-1])+double(nh_B[func_num-1]));
 }
-void SaveBestValues(int func_num, double* BestG, double* BestH)
+void SaveBestValues(int func_num, double* BestG, double* BestH, double* BestInd)
 {
     double temp = globalbest;// - fopt[0];
     if(temp <= 1E-8 && globalbestpenalty <= 1E-8 && ResultsArray[ResTsize2-1] == MaxFEval)
@@ -169,6 +292,8 @@ void SaveBestValues(int func_num, double* BestG, double* BestH)
                 ResultsArrayG[stepFEcount][i] = BestG[i];
             for(int i=0;i!=6;i++)
                 ResultsArrayH[stepFEcount][i] = BestH[i];
+			for(int i=0;i!=GNVars;i++)
+                ResultsArrayX[stepFEcount][i] = BestInd[i];
             LastFEcount = stepFEcount;
         }
     }
@@ -228,6 +353,7 @@ public:
     double* BestInd;
     double BestG[3];
     double BestH[6];
+    double* BestX;
     double* EpsLevels;
     double* massvector;
     double* tempvector;
@@ -494,7 +620,7 @@ void Optimizer::MainCycle()
             for(int j=0;j!=6;j++)
                 BestH[j] = PopulH[IndIter][j];
         }
-        SaveBestValues(func_num,BestG,BestH);
+        SaveBestValues(func_num,BestG,BestH,BestInd);
     }
     for(int i=0;i!=NIndsFront;i++)
     {
@@ -792,7 +918,7 @@ void Optimizer::MainCycle()
                 SuccessFilled++;
                 PFIndex = (PFIndex + 1)%NIndsFront;
             }
-            SaveBestValues(func_num,BestG,BestH);
+            SaveBestValues(func_num,BestG,BestH,BestInd);
         }
         SuccessRate = double(SuccessFilled)/double(NIndsFront);
         newNIndsFront = int(double(4-NIndsFrontMax)/double(MaxFEval)*NFEval + NIndsFrontMax);
@@ -910,7 +1036,7 @@ int main(int argc, char** argv)
 		delete xtmp;
 	}
 
-    for(int GNVarsIter = 0;GNVarsIter!=4;GNVarsIter++)
+    for(int GNVarsIter = 1;GNVarsIter!=2;GNVarsIter++)
     {
         if(GNVarsIter == 0)
             GNVars = 10;
@@ -931,6 +1057,16 @@ int main(int argc, char** argv)
             ofstream foutC2(buffer);
             sprintf(buffer, "CL-SRDE_F%d_D%d.txt",func_num,GNVars);
             ofstream foutC3(buffer);
+			sprintf(buffer, "CL-SRDE_X%d_D%d.txt",func_num,GNVars);
+            ofstream foutC4(buffer);
+			sprintf(buffer, "CL-SRDE_eps_F%d_D%d.txt",func_num,GNVars);
+            ofstream foutC5(buffer);
+            fout.precision(12);
+            foutC.precision(12);
+            foutC2.precision(12);
+            foutC3.precision(12);
+            foutC4.precision(12);
+            foutC5.precision(12);
             getOptimum(func_num);
             for (int run = 0;run!=TotalNRuns;run++)
             {
@@ -946,11 +1082,15 @@ int main(int argc, char** argv)
                 OptZ.MainCycle();
                 OptZ.Clean();
 
-                for(int k=0;k!=ResTsize2;k++)
+                for(int k=0;k!=ResTsize2-1;k++)
                     foutC3<<ResultsArray[k]<<"\t";
                 foutC3<<endl;
 
-                for(int k=0;k!=ResTsize2;k++)
+				for(int k=0;k!=ResTsize2-1;k++)
+                    foutC5<<ResultsArray[k]<<"\t";
+                foutC5<<endl;
+
+                for(int k=0;k!=ResTsize2-1;k++)
                 {
                     fout<<ResultsArray[k]<<"\t";
 
@@ -963,26 +1103,41 @@ int main(int argc, char** argv)
                     for(int L=0;L!=ng_B[func_num-1];L++)
                     {
                         foutC2<<ResultsArrayG[k][L]<<"\t";
-                        sumConstr += ResultsArrayG[k][L];
+						double temp_g = ResultsArrayG[k][L];
+						temp_g = max(0.0,temp_g);
+                        sumConstr += temp_g;
                     }
                     for(int L=0;L!=nh_B[func_num-1];L++)
                     {
                         foutC2<<ResultsArrayH[k][L]<<"\t";
-                        sumConstr += ResultsArrayH[k][L];
+						double temp_h = fabs(ResultsArrayH[k][L]);
+						if(temp_h < epsilon0001)
+							temp_h = 0;
+                        sumConstr += temp_h;
                     }
                     if(k == ResTsize2-1)
                         sumConstr = ResultsArray[k];
                     foutC3<<sumConstr<<"\t";
+					if(sumConstr < epsilon0001)
+						sumConstr = 0;
+					foutC5<<sumConstr<<"\t";
+
+					for(int L=0;L!=GNVars;L++)
+                        foutC4<<ResultsArrayX[k][L]<<"\t";
                 }
 				fout<<endl;
 				foutC<<endl;
 				foutC2<<endl;
-				foutC3<<endl;                
+				foutC3<<endl;
+				foutC4<<endl;
+				foutC5<<endl;
             }
 			fout.close();
 			foutC.close();
 			foutC2.close();
 			foutC3.close();
+			foutC4.close();
+			foutC5.close();
         }
     }
     t1g=clock()-t0g;
