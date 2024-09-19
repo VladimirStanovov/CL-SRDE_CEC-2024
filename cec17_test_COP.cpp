@@ -456,10 +456,9 @@ void COP_09 (double *x, double *f, double *g, double *h, int nx, double *Os, dou
 	f[0]=t;
 	h[0] = 0.0;
 	g[0] = 1.0;
-	for (i=1; i<nx/2; i++)
+	for (i=0; i<nx/2-1; i++) //for (i=1; i<nx/2-1; i++)
 	{
-		h[0] += (z[2*i]*z[2*i]-z[2*i+1])*(z[2*i]*z[2*i]-z[2*i+1]);
-
+		h[0] += (z[2*i]*z[2*i]-z[2*(i+1)])*(z[2*i]*z[2*i]-z[2*(i+1)]); //original: h[0] += (z[2*i]*z[2*i]-z[2*i+1])*(z[2*i]*z[2*i]-z[2*i+1]);
 	}
 	for (i=1; i<nx/2+1; i++)
 	{
@@ -610,12 +609,12 @@ void COP_15 (double *x, double *f, double *g, double *h, int nx, double *Os, dou
 {
 	int i;
     sr_func (x, z, nx, Os, Mr, 5.12/100.0, s_flag, r_flag); /* shift and rotate */
-    f[0] = z[0];
+    f[0] = fabs(z[0]);
     for (i=1;i<nx; i++)
     {
-       if (f[0] < z[i])
+       if (f[0] < fabs(z[i]))
        {
-           f[0] = z[i];
+           f[0] = fabs(z[i]);
        }
     }
 	h[0] = 0.0;
