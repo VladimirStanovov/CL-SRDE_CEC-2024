@@ -20,7 +20,11 @@ This will create CL-SRDE executable, available for running. Extract inputData.zi
 
 # Results format
 
-Data will be written to several files with different format. Here F and D are the function number and problem dimension:
+Data will be written to several files with different format. 
+
+The repository contains two archives, Results_september2024.zip contains the full record of function values, constraint violations and coordinates of solutions. The second archive, results_transposed.zip contains the data from the same run, but only transposed unlike in the first archive. Files CL-SRDE_F%d_D%d.txt here store function values and total violations for further analysis as required by the CEC 2024 competition technical report.
+
+Here F and D are the function number and problem dimension:
 
 1. CL-SRDE_f_F%d_D%d_.txt - stores the function values, 25x2000, 25 is the number of runs, 2000 steps of saving.
 
